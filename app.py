@@ -6,11 +6,12 @@ import re
 # Configuración visual
 st.set_page_config(page_title="Extractor Honest Final", layout="wide")
 st.title("📦 Extractor de Inventario")
-st.markdown("Búsqueda mejorada: Detecta 'Honest Lab' aunque esté pegado a otros textos.")
+st.markdown("Buscador implacable: Encuentra 'HONEST LAB' en cualquier parte de la fila.")
 
 # --- BARRA LATERAL ---
 st.sidebar.header("Configuración de Filtros")
-proveedor_fijo = st.sidebar.text_input("Proveedor a incluir siempre", "HONEST LAB")
+# He acortado a "HONEST" para que pille "HONEST LAB", "HONEST LABS", etc.
+proveedor_fijo = st.sidebar.text_input("Proveedor a incluir siempre", "HONEST")
 palabras_extra_str = st.sidebar.text_input("Keywords obligatorias para otros proveedores", "STONE, TABLE")
 
 st.sidebar.markdown("---")
@@ -27,12 +28,11 @@ orden_alfabetico = st.sidebar.checkbox("Ordenar alfabéticamente", value=True)
 archivos_subidos = st.file_uploader("Sube aquí tus PDFs", type="pdf", accept_multiple_files=True)
 
 if archivos_subidos:
-    # Preparar índices y palabras clave
     idx_extra = [int(i.strip()) for i in indices_extra_str.split(",") if i.strip()]
     keywords = [p.strip().upper() for p in palabras_extra_str.split(",") if p.strip()]
     datos_brutos = []
 
-    with st.spinner('Procesando...'):
+    with st.spinner('Procesando datos...'):
         for archivo in archivos_subidos:
             with pdfplumber.open(archivo) as pdf:
                 for pagina in pdf.pages:
@@ -40,25 +40,27 @@ if archivos_subidos:
                     if tabla:
                         for fila in tabla:
                             try:
-                                # Unimos TODA la fila en un texto para buscar al proveedor
-                                fila_completa = " ".join([str(c) for c in fila if c]).upper()
-                                # Quitamos símbolos raros para que no estorben en la búsqueda
-                                fila_limpia = fila_completa.replace('\n', ' ').replace('=', ' ')
+                                # 1. JUNTAMOS TODA LA FILA EN UN SOLO TEXTO
+                                # Buscamos en toda la fila por si el texto está movido de columna
+                                texto_total_fila = " ".join([str(c) for c in fila if c]).upper()
                                 
                                 nombre_prod = str(fila[col_nombre]).replace('\n', ' ').strip()
                                 
-                                # ¿Es del proveedor fijo?
+                                # 2. ¿ESTÁ LA PALABRA HONEST EN LA FILA?
+                                # Basta con que encuentre "HONEST" para saber que es de ellos
                                 es_honest = False
-                                if proveedor_fijo.upper() in fila_limpia:
+                                if proveedor_fijo.upper() in texto_total_fila:
                                     es_honest = True
                                 
-                                # ¿Tiene las keywords?
+                                # 3. ¿TIENE LAS KEYWORDS? (Para otros proveedores)
                                 tiene_keys = False
                                 if keywords:
                                     tiene_keys = all(k in nombre_prod.upper() for k in keywords)
 
+                                # SI SE CUMPLE ALGUNA, GUARDAMOS
                                 if es_honest or tiene_keys:
                                     qty_raw = str(fila[col_cantidad])
+                                    # Sacamos solo los números de la cantidad
                                     qty = int(''.join(filter(str.isdigit, qty_raw))) if any(c.isdigit() for c in qty_raw) else 0
                                     
                                     if qty > 0:
@@ -83,12 +85,14 @@ if archivos_subidos:
         else:
             df = df.sort_values(by='Cantidad', ascending=False)
 
-        # Cantidad al final
         cols_final = [c for c in df.columns if c != 'Cantidad'] + ['Cantidad']
         df = df[cols_final]
 
         st.success(f"¡Análisis completado!")
         st.dataframe(df, use_container_width=True)
 
+        # Descarga con formato compatible para Excel
         csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Descargar CSV", csv, "inventario.csv", "text/csv")
+        st.download_button("📥 Descargar CSV", csv, "inventario_honest.csv", "text/csv")
+    else:
+        st.warning("No he encontrado nada. Prueba a cambiar el 'Proveedor' o las 'Keywords'.")

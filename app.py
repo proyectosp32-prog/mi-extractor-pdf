@@ -10,19 +10,13 @@ st.title("📦 Extractor de Inventario Pro")
 # --- BARRA LATERAL ---
 st.sidebar.header("1. Filtros de Búsqueda")
 proveedor_fijo = st.sidebar.text_input("Proveedor a incluir siempre", "HONEST")
-palabras_extra_str = st.sidebar.text_area(
-    "Keywords (Otros proveedores)", 
-    "STONE, TABLE ; STONE, MESA"
-)
+palabras_extra_str = st.sidebar.text_area("Keywords (Otros proveedores)", "STONE, TABLE ; STONE, MESA")
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Control de Agrupación")
 agrupar = st.sidebar.checkbox("Activar agrupación inteligente", value=True)
 limpiar_num = st.sidebar.checkbox("Quitar números finales (01, 02...)", value=True)
-productos_para_sumar_total = st.sidebar.text_area(
-    "Productos a SUMAR TOTALMENTE", 
-    "BANCO NAGA"
-)
+productos_para_sumar_total = st.sidebar.text_area("Productos a SUMAR TOTALMENTE", "BANCO NAGA")
 
 st.sidebar.markdown("---")
 st.sidebar.header("3. Ajustes de Columnas")
@@ -32,17 +26,21 @@ indices_extra_str = st.sidebar.text_input("Otras columnas (ej: 6, 7)", "6, 7")
 
 st.sidebar.markdown("---")
 st.sidebar.header("4. Orden del Listado")
-# CAMBIO: Ahora es un selector con tres opciones
+# USAMOS BOTONES REDONDOS (Radio)
 opcion_orden = st.sidebar.radio(
-    "Selecciona el orden:",
-    ("Orden original del PDF", "Alfabético (A-Z)", "Por cantidad (Mayor a menor)")
+    "Selecciona cómo quieres la lista:",
+    ["Orden original del PDF", "Alfabético (A-Z)", "Por cantidad (Mayor a menor)"]
 )
 
 # --- PROCESAMIENTO ---
 archivos_subidos = st.file_uploader("Sube aquí tus PDFs", type="pdf", accept_multiple_files=True)
 
 if archivos_subidos:
-    idx_extra = [int(i.strip()) for i in indices_extra_str.split(",") if i.strip()]
+    try:
+        idx_extra = [int(i.strip()) for i in indices_extra_str.split(",") if i.strip()]
+    except:
+        idx_extra = []
+    
     lista_sumar_total = [s.strip().upper() for s in productos_para_sumar_total.split(",") if s.strip()]
     
     grupos_keywords = []
@@ -52,9 +50,9 @@ if archivos_subidos:
             grupos_keywords.append(palabras)
 
     datos_brutos = []
-    contador_posicion = 0 # Para recordar el orden original
+    contador_orden = 0 
 
-    with st.spinner('Analizando PDFs...'):
+    with st.spinner('Procesando...'):
         for archivo in archivos_subidos:
             with pdfplumber.open(archivo) as pdf:
                 for pagina in pdf.pages:
@@ -78,17 +76,15 @@ if archivos_subidos:
                                     qty = int(''.join(filter(str.isdigit, qty_raw))) if any(c.isdigit() for c in qty_raw) else 0
                                     
                                     if qty > 0:
-                                        contador_posicion += 1
+                                        contador_orden += 1
                                         extras = [str(fila[i]).replace('\n', ' ').strip() if fila[i] else "" for i in idx_extra]
-                                        # Guardamos la 'posicion' como primer elemento
-                                        datos_brutos.append([contador_posicion, nombre_prod] + extras + [qty])
+                                        datos_brutos.append([contador_orden, nombre_prod] + extras + [qty])
                             except:
                                 continue
 
     if datos_brutos:
-        # Añadimos 'Posicion' a las columnas
-        columnas_nombres = ["Posicion", "Producto"] + [f"Info_{i}" for i in idx_extra] + ["Cantidad"]
-        df = pd.DataFrame(datos_brutos, columns=columnas_nombres)
+        columnas = ["Posicion_Original", "Producto"] + [f"Info_{i}" for i in idx_extra] + ["Cantidad"]
+        df = pd.DataFrame(datos_brutos, columns=columnas)
 
         if agrupar:
             if limpiar_num:
@@ -102,26 +98,26 @@ if archivos_subidos:
                 return row
             df = df.apply(aplicar_excepcion, axis=1)
             
-            # Agrupamos. Para la 'Posicion', nos quedamos con la mínima (la primera vez que apareció)
-            columnas_agrupar = [c for c in df.columns if c not in ['Cantidad', 'Posicion']]
-            df = df.groupby(columnas_agrupar).agg({'Cantidad': 'sum', 'Posicion': 'min'}).reset_index()
+            # Agrupamos. La posicion original será la más pequeña (la primera vez que sale)
+            cols_agrup = [c for c in df.columns if c not in ['Cantidad', 'Posicion_Original']]
+            df = df.groupby(cols_agrup).agg({'Cantidad': 'sum', 'Posicion_Original': 'min'}).reset_index()
 
-        # --- APLICAR EL ORDEN ELEGIDO ---
+        # APLICAR EL ORDEN
         if opcion_orden == "Orden original del PDF":
-            df = df.sort_values(by='Posicion', ascending=True)
+            df = df.sort_values(by='Posicion_Original', ascending=True)
         elif opcion_orden == "Alfabético (A-Z)":
             df = df.sort_values(by='Producto', ascending=True)
         else:
             df = df.sort_values(by='Cantidad', ascending=False)
 
-        # Quitamos la columna Posicion antes de mostrar/descargar para que no ensucie
-        cols_final = [c for c in df.columns if c not in ['Cantidad', 'Posicion']] + ['Cantidad']
-        df_mostrar = df[cols_final]
+        # Limpiar columna de posición antes de mostrar
+        cols_finales = [c for c in df.columns if c not in ['Cantidad', 'Posicion_Original']] + ['Cantidad']
+        df_final = df[cols_finales]
 
-        st.success(f"¡Hecho! Listado generado.")
-        st.dataframe(df_mostrar, use_container_width=True)
+        st.success("¡Listado generado!")
+        st.dataframe(df_final, use_container_width=True)
 
-        csv = df_mostrar.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Descargar Inventario (CSV)", csv, "inventario.csv", "text/csv")
+        csv = df_final.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Descargar CSV", csv, "inventario.csv", "text/csv")
     else:
-        st.warning("No se encontraron resultados.")
+        st.warning("No hay resultados con estos filtros.")
